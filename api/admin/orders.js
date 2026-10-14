@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const appBaseUrl = getAppBaseUrl();
+    const appBaseUrl = getAppBaseUrl(req.headers.origin);
     if (!validateSameOrigin(req, appBaseUrl)) {
       return res.status(403).json({ error: 'Request origin is not allowed.' });
     }

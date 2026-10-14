@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const appBaseUrl = getAppBaseUrl();
+    const appBaseUrl = getAppBaseUrl(req.headers.origin);
     if (!validateSameOrigin(req, appBaseUrl)) {
       return res.status(403).json({ error: 'Request origin is not allowed.' });
     }
@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     if (error instanceof OrderValidationError) {
       return res.status(400).json({ error: error.message });
     }
-    console.error('Cash on Delivery order creation failed.', error.message);
+    console.error('Cash on Delivery order creation failed.', error);
     return res.status(500).json({ error: 'Unable to save the order. Please try again.' });
   }
 }

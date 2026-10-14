@@ -134,6 +134,14 @@ export default function App() {
     }
   }, [orderHistory]);
 
+  useEffect(() => {
+    if (checkoutStep !== 'confirmation') return undefined;
+    const timeoutId = window.setTimeout(() => {
+      setCheckoutStep(current => current === 'confirmation' ? 'history' : current);
+    }, 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [checkoutStep]);
+
   function flash(message) {
     setToast(message);
     window.setTimeout(() => setToast(''), 2200);
@@ -243,8 +251,7 @@ export default function App() {
       const order = createOrderRecord('cod', result.order.reference);
       const savedOrder = { ...order, createdAt: result.order.createdAt };
       setOrderHistory(current => current.map(item => item.reference === order.reference ? savedOrder : item));
-      setCheckoutStep('history');
-      flash('Cash on Delivery order confirmed. It is now in your Order history.');
+      setCheckoutStep('confirmation');
     } catch (error) {
       console.error('Cash on Delivery order request failed.', error);
       setPaymentError(error.message || 'Unable to place this order. Please try again.');
