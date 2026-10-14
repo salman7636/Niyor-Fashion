@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight, ArrowUpRight, BadgeCheck, Check, ChevronRight, Heart, ReceiptText,
   Headphones, Menu, Minus, Plus, Search, ShieldCheck, ShoppingBag,
@@ -7,6 +7,8 @@ import {
 import { products } from './products.js';
 
 const WHATSAPP_NUMBER = '917636947629';
+const RAZORPAY_CHECKOUT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
+let razorpayScriptPromise;
 
 const categories = [
   { label: 'Men', image: 'photo-1516257984-b1b4d707412e', note: 'Built for every day' },
@@ -34,6 +36,62 @@ function loadOrderHistory() {
   }
 }
 
+async function loadRazorpayCheckout() {
+  if (typeof window.Razorpay === 'function') return;
+  if (razorpayScriptPromise) return razorpayScriptPromise;
+
+  razorpayScriptPromise = new Promise((resolve, reject) => {
+    const script = document.querySelector(`script[src="${RAZORPAY_CHECKOUT_URL}"]`) || document.createElement('script');
+    let timeout;
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      script.removeEventListener('load', onLoad);
+      script.removeEventListener('error', onError);
+    };
+    const onLoad = () => {
+      cleanup();
+      if (typeof window.Razorpay === 'function') resolve();
+      else {
+        script.remove();
+        reject(new Error('Razorpay loaded without its checkout interface. Reload the page and try again.'));
+      }
+    };
+    const onError = () => {
+      cleanup();
+      script.remove();
+      reject(new Error('Razorpay checkout could not load. Check your internet connection or content blocker and try again.'));
+    };
+
+    script.addEventListener('load', onLoad);
+    script.addEventListener('error', onError);
+    timeout = window.setTimeout(() => {
+      cleanup();
+      script.remove();
+      reject(new Error('Razorpay checkout is taking too long to load. Check your internet connection and try again.'));
+    }, 15000);
+
+    if (!script.src) {
+      script.src = RAZORPAY_CHECKOUT_URL;
+      script.async = true;
+      document.body.appendChild(script);
+    }
+  }).catch(error => {
+    razorpayScriptPromise = undefined;
+    throw error;
+  });
+
+  return razorpayScriptPromise;
+}
+
+async function readApiResponse(response, unavailableMessage) {
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new Error(unavailableMessage);
+  }
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'The checkout request failed. Please try again.');
+  return result;
+}
+
 export default function App() {
   const [category, setCategory] = useState('All');
   const [search, setSearch] = useState('');
@@ -48,6 +106,9 @@ export default function App() {
   const [orderHistory, setOrderHistory] = useState(loadOrderHistory);
   const [startingPayment, setStartingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState('');
+  const [cancellingOrder, setCancellingOrder] = useState('');
+  const [cancellationError, setCancellationError] = useState('');
+  const cancellationInFlight = useRef(new Set());
   const [deliveryDetails, setDeliveryDetails] = useState({
     name: '', phone: '', email: '', address: '', landmark: '', city: '', state: '', pincode: ''
   });
@@ -72,72 +133,6 @@ export default function App() {
       console.error('Unable to save order history in this browser.', error);
     }
   }, [orderHistory]);
-
-  useEffect(() => {
-    const returnUrl = new URL(window.location.href);
-    const provider = returnUrl.searchParams.get('payment');
-    const merchantOrderId = returnUrl.searchParams.get('orderId');
-    if (provider !== 'phonepe' || !merchantOrderId) return undefined;
-
-    setCheckoutStep('history');
-    setCartOpen(true);
-
-    let active = true;
-    let attempts = 0;
-    let timer;
-    const clearReturnParams = () => {
-      const currentUrl = new URL(window.location.href);
-      if (currentUrl.searchParams.get('orderId') !== merchantOrderId) return;
-      currentUrl.searchParams.delete('payment');
-      currentUrl.searchParams.delete('orderId');
-      window.history.replaceState({}, '', `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
-    };
-    const verifyPayment = async () => {
-      attempts += 1;
-      try {
-        const response = await fetch(`/api/phonepe/payment-status?merchantOrderId=${encodeURIComponent(merchantOrderId)}`);
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Unable to verify this payment.');
-        if (!active) return;
-
-        setOrderHistory(current => current.map(order => {
-          if (order.reference !== merchantOrderId) return order;
-          if (result.state === 'COMPLETED') {
-            return { ...order, status: 'Payment successful', paymentStatus: 'Paid', trackingStep: 0 };
-          }
-          if (result.state === 'FAILED' || result.state === 'EXPIRED') {
-            return { ...order, status: 'Payment not completed', paymentStatus: result.state, trackingStep: -1 };
-          }
-          return { ...order, status: 'Payment pending', paymentStatus: 'Pending' };
-        }));
-
-        if (result.state !== 'COMPLETED' && result.state !== 'FAILED' && result.state !== 'EXPIRED' && attempts < 40) {
-          timer = window.setTimeout(verifyPayment, 3000);
-        } else if (result.state === 'COMPLETED') {
-          clearReturnParams();
-          flash('Payment successful. Order history updated.');
-        } else if (result.state === 'FAILED' || result.state === 'EXPIRED' || attempts >= 40) {
-          clearReturnParams();
-        }
-      } catch (error) {
-        console.error('Unable to verify PhonePe payment.', error);
-        if (active && attempts < 40) {
-          setOrderHistory(current => current.map(order => order.reference === merchantOrderId
-            ? { ...order, status: 'Checking payment status' }
-            : order));
-          timer = window.setTimeout(verifyPayment, 3000);
-        } else if (active) {
-          clearReturnParams();
-          flash('Payment status could not be verified. Please check Order history again.');
-        }
-      }
-    };
-    verifyPayment();
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, []);
 
   function flash(message) {
     setToast(message);
@@ -170,7 +165,7 @@ export default function App() {
       ? `${items.map(i => `${i.name} × ${i.quantity} — ${money(i.price * i.quantity)}`).join('\n')}\nSubtotal: ${money(orderSubtotal)}`
       : 'Hi Niyor Fashion! I would like to know more about your collection.';
     const delivery = details
-      ? `\n\nOrder reference: ${reference || 'New order'}\nDelivery details:\nName: ${details.name}\nPhone: ${details.phone}${details.email ? `\nEmail: ${details.email}` : ''}\nAddress: ${details.address}${details.landmark ? `, ${details.landmark}` : ''}\nCity: ${details.city}\nState: ${details.state}\nPIN code: ${details.pincode}\nPayment: ${method === 'upi' ? 'UPI via PhonePe' : 'Cash on Delivery'}`
+      ? `\n\nOrder reference: ${reference || 'New order'}\nDelivery details:\nName: ${details.name}\nPhone: ${details.phone}${details.email ? `\nEmail: ${details.email}` : ''}\nAddress: ${details.address}${details.landmark ? `, ${details.landmark}` : ''}\nCity: ${details.city}\nState: ${details.state}\nPIN code: ${details.pincode}\nPayment: ${method === 'upi' ? 'UPI via Razorpay' : 'Cash on Delivery'}`
       : '\nPlease confirm availability, size and delivery.';
     const text = items.length
       ? `Hi Niyor Fashion! I'd like to order:\n${order}${delivery}`
@@ -193,41 +188,200 @@ export default function App() {
       paymentMethod: method,
       status: method === 'cod' ? 'Order confirmed' : 'Awaiting payment',
       paymentStatus: method === 'cod' ? 'Cash on Delivery' : 'Pending',
-      trackingStep: method === 'cod' ? 0 : -1
+      trackingStep: method === 'cod' ? 0 : -1,
+      customer: {
+        name: deliveryDetails.name,
+        phone: deliveryDetails.phone,
+        email: deliveryDetails.email
+      },
+      delivery: {
+        address: deliveryDetails.address,
+        landmark: deliveryDetails.landmark,
+        city: deliveryDetails.city,
+        state: deliveryDetails.state,
+        pincode: deliveryDetails.pincode
+      }
     };
     setOrderHistory(current => [record, ...current]);
     setOrderReference(reference);
     return record;
   }
-  async function startPhonePePayment() {
+  function deliveryPayload() {
+    return {
+      customer: {
+        name: deliveryDetails.name,
+        phone: deliveryDetails.phone,
+        email: deliveryDetails.email
+      },
+      delivery: {
+        address: deliveryDetails.address,
+        landmark: deliveryDetails.landmark,
+        city: deliveryDetails.city,
+        state: deliveryDetails.state,
+        pincode: deliveryDetails.pincode
+      }
+    };
+  }
+  async function placeCodOrder() {
     setStartingPayment(true);
     setPaymentError('');
     try {
-      const response = await fetch('/api/phonepe/create-payment', {
+      const response = await fetch('/api/orders/create-cod', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: orderItems.map(item => ({ id: item.id, quantity: item.quantity })) })
+        body: JSON.stringify({
+          items: orderItems.map(item => ({ id: item.id, quantity: item.quantity })),
+          ...deliveryPayload()
+        })
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Unable to start PhonePe checkout.');
-      if (typeof result.redirectUrl !== 'string' || typeof result.merchantOrderId !== 'string') {
-        throw new Error('PhonePe returned an invalid checkout response.');
+      const result = await readApiResponse(
+        response,
+        'Order service is not running. Start the website with `npm run dev` (Netlify Dev) and open the Netlify URL, usually http://localhost:8888.'
+      );
+      if (typeof result.order?.reference !== 'string') throw new Error('The order service returned an invalid order reference.');
+
+      const order = createOrderRecord('cod', result.order.reference);
+      const savedOrder = { ...order, createdAt: result.order.createdAt };
+      setOrderHistory(current => current.map(item => item.reference === order.reference ? savedOrder : item));
+      setCheckoutStep('history');
+      flash('Cash on Delivery order confirmed. It is now in your Order history.');
+    } catch (error) {
+      console.error('Cash on Delivery order request failed.', error);
+      setPaymentError(error.message || 'Unable to place this order. Please try again.');
+    } finally {
+      setStartingPayment(false);
+    }
+  }
+  async function cancelCodOrder(reference) {
+    if (cancellationInFlight.current.has(reference)) return;
+    if (!window.confirm('Cancel this Cash on Delivery order?')) return;
+    cancellationInFlight.current.add(reference);
+    setCancellingOrder(reference);
+    setCancellationError('');
+    try {
+      const response = await fetch('/api/orders/cancel-cod', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference })
+      });
+      const result = await readApiResponse(
+        response,
+        'Order cancellation service is not available. Please try again from the Netlify storefront.'
+      );
+      if (result.order?.reference !== reference || result.order.status !== 'Order cancelled') {
+        throw new Error('The order service returned an invalid cancellation response.');
+      }
+      setOrderHistory(current => current.map(order => order.reference === reference
+        ? { ...order, ...result.order }
+        : order));
+      flash('Order cancelled successfully.');
+    } catch (error) {
+      console.error('Unable to cancel Cash on Delivery order.', error);
+      setCancellationError(error.message || 'Unable to cancel this order. Please try again.');
+    } finally {
+      cancellationInFlight.current.delete(reference);
+      setCancellingOrder('');
+    }
+  }
+  async function verifyRazorpayPayment(paymentResponse, reference, attempt = 0) {
+    try {
+      const response = await fetch('/api/razorpay/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paymentResponse)
+      });
+      const result = await readApiResponse(
+        response,
+        'The payment verification service is unavailable. Please check Order history and contact support before paying again.'
+      );
+      if (result.state === 'PENDING' && attempt < 20) {
+        window.setTimeout(() => verifyRazorpayPayment(paymentResponse, reference, attempt + 1), 2500);
+        return;
+      }
+      setOrderHistory(current => current.map(order => order.reference === reference
+        ? result.state === 'COMPLETED'
+          ? { ...order, status: 'Payment successful', paymentStatus: 'Paid', trackingStep: 0 }
+          : result.state === 'FAILED'
+            ? { ...order, status: 'Payment not completed', paymentStatus: 'Failed', trackingStep: -1 }
+            : { ...order, status: 'Payment pending', paymentStatus: 'Pending' }
+        : order));
+      setCheckoutStep('history');
+      setCartOpen(true);
+      if (result.state === 'COMPLETED') flash('Payment successful. Order history updated.');
+      else if (result.state === 'FAILED') flash('Payment was not completed. Please try again.');
+      else flash('Payment is still processing. Check Order history shortly.');
+    } catch (error) {
+      console.error('Unable to verify Razorpay payment.', error);
+      setPaymentError(error.message || 'Unable to verify Razorpay payment. Please check Order history.');
+      setCheckoutStep('history');
+      setCartOpen(true);
+    }
+  }
+  async function startRazorpayPayment() {
+    setStartingPayment(true);
+    setPaymentError('');
+    try {
+      await loadRazorpayCheckout();
+      const response = await fetch('/api/razorpay/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: orderItems.map(item => ({ id: item.id, quantity: item.quantity })),
+          ...deliveryPayload()
+        })
+      });
+      const result = await readApiResponse(
+        response,
+        'Payment service is not running. Start the website with `npm run dev` (Netlify Dev) and open the Netlify URL, usually http://localhost:8888.'
+      );
+      if (
+        typeof result.gatewayOrderId !== 'string' ||
+        typeof result.reference !== 'string' ||
+        typeof result.keyId !== 'string' ||
+        !Number.isSafeInteger(result.amount)
+      ) {
+        throw new Error('Razorpay returned an invalid checkout order.');
       }
 
-      const record = createOrderRecord('upi', result.merchantOrderId);
+      const record = createOrderRecord('upi', result.reference);
       try {
         window.localStorage.setItem('niyor-order-history', JSON.stringify([
           record,
           ...orderHistory.filter(order => order.reference !== record.reference)
         ]));
       } catch (error) {
-        console.error('Unable to save pending PhonePe order before redirect.', error);
+        console.error('Unable to save pending Razorpay order before checkout.', error);
         throw new Error('Could not save the order in this browser. Please enable local storage and try again.');
       }
-      window.location.assign(result.redirectUrl);
+      const checkout = new window.Razorpay({
+        key: result.keyId,
+        amount: result.amount,
+        currency: result.currency,
+        name: 'NIYOR Fashion',
+        description: `Order ${result.reference}`,
+        order_id: result.gatewayOrderId,
+        prefill: {
+          name: deliveryDetails.name,
+          email: deliveryDetails.email,
+          contact: deliveryDetails.phone
+        },
+        notes: { order_reference: result.reference },
+        theme: { color: '#ffd400' },
+        handler: paymentResponse => {
+          void verifyRazorpayPayment(paymentResponse, result.reference);
+        },
+        modal: {
+          ondismiss: () => {
+            setStartingPayment(false);
+            flash('Payment was not completed. You can try again from this order.');
+          }
+        }
+      });
+      checkout.open();
+      setStartingPayment(false);
     } catch (error) {
-      console.error('Unable to start PhonePe payment.', error);
-      setPaymentError(error.message || 'Unable to start PhonePe checkout.');
+      console.error('Unable to start Razorpay payment.', error);
+      setPaymentError(error.message || 'Unable to start Razorpay checkout.');
       setStartingPayment(false);
     }
   }
@@ -361,18 +515,15 @@ export default function App() {
         {checkoutStep === 'payment' && <div className="payment-step">
           <p className="checkout-intro">Review your order and choose a payment method.</p>
           <div className="checkout-order">{orderItems.map(item => <div key={item.id}><span>{item.name} × {item.quantity}</span><b>{money(item.price * item.quantity)}</b></div>)}<div className="checkout-order-discount"><span>You save</span><b>−{money(orderDiscount)}</b></div><div className="checkout-order-total"><span>Order total</span><b>{money(orderSubtotal)}</b></div></div>
-          <button className="payment-choice cod-place-order" onClick={() => {
-            createOrderRecord('cod');
-            setCheckoutStep('confirmation');
-          }}><span><b>Cash on Delivery</b><small>Tap to confirm your order now. No WhatsApp step required.</small></span><ArrowRight size={17} /></button>
-          <label className={`payment-choice ${paymentMethod === 'upi' ? 'selected' : ''}`}><input type="radio" name="payment" value="upi" checked={paymentMethod === 'upi'} onChange={() => { setPaymentMethod('upi'); setPaymentError(''); }} /><span><b>UPI</b><small>Pay securely through PhonePe Payment Gateway.</small></span></label>
-          {paymentMethod === 'upi' && <div className="upi-details">
-            <span className="upi-label">PHONEPE SECURE CHECKOUT</span>
-            <strong>UPI, PhonePe and supported payment methods</strong>
-            <small>Your order moves to Order history as paid only after PhonePe verifies the payment.</small>
-          </div>}
           {paymentError && <p className="payment-error" role="alert">{paymentError}</p>}
-          {paymentMethod === 'upi' && <button className="btn btn-yellow checkout" disabled={startingPayment} onClick={startPhonePePayment}>{startingPayment ? 'Connecting to PhonePe…' : 'Pay securely with PhonePe'} <ArrowUpRight size={16} /></button>}
+          <button className="payment-choice cod-place-order" disabled={startingPayment} onClick={placeCodOrder}><span><b>Cash on Delivery</b><small>{startingPayment ? 'Saving your order…' : 'Tap to confirm your order now. No WhatsApp step required.'}</small></span><ArrowRight size={17} /></button>
+          <label className={`payment-choice ${paymentMethod === 'upi' ? 'selected' : ''}`}><input type="radio" name="payment" value="upi" checked={paymentMethod === 'upi'} onChange={() => { setPaymentMethod('upi'); setPaymentError(''); }} /><span><b>UPI</b><small>Pay securely through Razorpay checkout.</small></span></label>
+          {paymentMethod === 'upi' && <div className="upi-details">
+            <span className="upi-label">RAZORPAY SECURE CHECKOUT</span>
+            <strong>UPI, cards and supported payment methods</strong>
+            <small>Your order moves to Order history as paid only after Razorpay verifies the captured payment.</small>
+          </div>}
+          {paymentMethod === 'upi' && <button className="btn btn-yellow checkout" disabled={startingPayment} onClick={startRazorpayPayment}>{startingPayment ? 'Connecting to Razorpay…' : 'Pay securely with Razorpay'} <ArrowUpRight size={16} /></button>}
           <button className="continue" onClick={() => setCheckoutStep('address')}>Back to delivery details</button>
         </div>}
         {checkoutStep === 'confirmation' && <div className="order-confirmation">
@@ -389,6 +540,7 @@ export default function App() {
           <button className="continue" onClick={() => setCartOpen(false)}>Continue shopping</button>
         </div>}
         {checkoutStep === 'history' && <div className="order-history">
+          {cancellationError && <p className="payment-error" role="alert">{cancellationError}</p>}
           {!orderHistory.length
             ? <div className="cart-empty"><ReceiptText size={35} /><h3>No orders yet.</h3><p>Your confirmed checkout orders will appear here on this browser.</p><button className="btn btn-yellow" onClick={() => { setCartOpen(false); goShop('All'); }}>Start shopping <ArrowRight size={16} /></button></div>
             : <>{orderHistory.map(order => <article className="history-order" key={order.reference}>
@@ -413,8 +565,15 @@ export default function App() {
                     </div>;
                   })}
                 </div>
-                <small>{order.paymentMethod === 'cod' ? 'Order confirmed. Further tracking updates are not available in this demo.' : order.status}</small>
+                <small>{order.status === 'Order cancelled' ? `Cancelled ${order.cancelledAt ? new Date(order.cancelledAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : ''}` : order.paymentMethod === 'cod' ? 'Order confirmed. Further tracking updates are not available in this demo.' : order.status}</small>
               </div>
+              {order.paymentMethod === 'cod' && order.status === 'Order confirmed' && <button
+                className="cancel-order"
+                disabled={cancellingOrder === order.reference}
+                onClick={() => cancelCodOrder(order.reference)}
+              >
+                {cancellingOrder === order.reference ? 'Cancelling…' : 'Cancel order'}
+              </button>}
             </article>)}
             <p className="history-note">Order history is saved only in this browser. Shipping progress is a placeholder until live store or courier tracking is connected.</p>
             <button className="continue" onClick={() => setCartOpen(false)}>Continue shopping</button></>}
