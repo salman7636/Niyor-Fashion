@@ -117,8 +117,7 @@ export default function App() {
 
   const filtered = useMemo(() => products.filter(p => {
     const cat = category === 'All' || p.category === category ||
-      (category === 'Men' && ['T-Shirts', 'Hoodies', 'Jackets'].includes(p.category)) ||
-      (category === 'Women' && ['Women', 'T-Shirts', 'Hoodies'].includes(p.category));
+      (category === 'Men' && ['T-Shirts', 'Hoodies', 'Jackets'].includes(p.category));
     return cat && p.name.toLowerCase().includes(search.toLowerCase());
   }), [category, search]);
 
@@ -446,7 +445,7 @@ export default function App() {
       </section>
 
       <section className="shop section" id="shop">
-        <div className="section-top"><div><div className="eyebrow">FRESH DROPS, ALWAYS</div><h2>Trending <em>right now.</em></h2></div><div className="shop-count">{filtered.length} PRODUCTS</div></div>
+        <div className="section-top"><div><div className="eyebrow">{category === 'Women' ? 'THE WOMEN’S EDIT' : 'FRESH DROPS, ALWAYS'}</div><h2>{category === 'Women' ? <>Women’s <em>collection.</em></> : <>Trending <em>right now.</em></>}</h2></div><div className="shop-count">{filtered.length} PRODUCTS</div></div>
         <div className="shop-tools">
           <div className="filters">{['All', 'T-Shirts', 'Hoodies', 'Jackets', 'Women', 'Accessories'].map(cat => <button key={cat} className={category === cat ? 'filter active' : 'filter'} onClick={() => setCategory(cat)}>{cat}</button>)}</div>
           <span className="filter-icon"><SlidersHorizontal size={14} /> FILTER</span>

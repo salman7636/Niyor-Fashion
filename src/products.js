@@ -7,4 +7,8 @@ export const products = [
   { id: 6, name: 'Niyor Signature Cap', category: 'Accessories', price: 399, oldPrice: 699, badge: '', color: 'Black / Yellow', size: 'One size', image: 'photo-1588850561407-ed78c282e89b', object: 'center' },
   { id: 7, name: 'Essential Everyday Hoodie', category: 'Hoodies', price: 1199, oldPrice: 1799, badge: '', color: 'Black', size: 'XL', image: 'photo-1578681994506-b8f463449011', object: 'center' },
   { id: 8, name: 'Minimal Crossbody Bag', category: 'Accessories', price: 599, oldPrice: 899, badge: '', color: 'Black', size: 'One size', image: 'photo-1548036328-c9fa89d128fa', object: 'center' },
+  { id: 9, name: 'Women’s Relaxed Street Tee', category: 'Women', price: 749, oldPrice: 1099, badge: 'NEW', color: 'White', size: 'M', image: 'photo-1529139574466-a303027c1d8b', object: 'center' },
+  { id: 10, name: 'Women’s Everyday Hoodie', category: 'Women', price: 1199, oldPrice: 1699, badge: 'BESTSELLER', color: 'Charcoal', size: 'S', image: 'photo-1483985988355-763728e1935b', object: 'center' },
+  { id: 11, name: 'Women’s Utility Cargo Pants', category: 'Women', price: 999, oldPrice: 1499, badge: 'TRENDING', color: 'Olive', size: 'M', image: 'photo-1515886657613-9f3515b0c78f', object: 'center' },
+  { id: 12, name: 'Women’s City Layer Jacket', category: 'Women', price: 1499, oldPrice: 2199, badge: 'LIMITED', color: 'Black', size: 'M', image: 'photo-1483985988355-763728e1935b', object: 'center' },
 ];

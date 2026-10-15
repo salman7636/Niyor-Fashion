@@ -87,9 +87,9 @@ export default function Admin() {
       {!accessToken ? <form className="admin-login" onSubmit={event => { event.preventDefault(); loadOrders(tokenInput); }}>
         <ShieldCheck size={30} />
         <h2>Staff sign in</h2>
-        <p>Enter the admin access token configured privately in Netlify to view customer orders.</p>
+        <p>Enter the private admin access token configured for this server to view customer orders.</p>
         <label htmlFor="admin-token">Admin access token</label>
-        <input id="admin-token" type="password" autoComplete="current-password" required value={tokenInput} onChange={event => setTokenInput(event.target.value)} />
+        <input id="admin-token" type="password" autoComplete="current-password" minLength={32} required value={tokenInput} onChange={event => setTokenInput(event.target.value)} />
         {error && <p className="admin-error" role="alert">{error}</p>}
         <button className="btn btn-yellow" disabled={loading}>{loading ? 'Checking access…' : 'Open order dashboard'}</button>
       </form> : <>
